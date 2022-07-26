@@ -1,203 +1,174 @@
 #!/usr/bin/python3
-""" Module for storing the markdown to html script. """
-from hashlib import md5
-from os.path import exists
+"""Markdown python file"""
+import hashlib
+import os
 import re
-from sys import argv as av
-from sys import stderr
-from time import sleep
+import sys
 
 
-def mark2html(*av):
-    """
-        Main method to parse and process markdown to html.
-    """
-    input_filename = av[1]
-    ouput_filename = av[2]
-    flags = av[3:]
-
-
-    with open(input_filename, "r") as f:
-        markdown = f.readlines()
-
-    html = []
-
-    # Iterate over lines of the read file.
-    index = 0
-    while index < len(markdown):
-        line = clean_line(markdown[index])
-
-        # If Heading.
-        if line[0] == "#":
-            html.append(h(line))
-
-        # If ordered or unordered list.
-        elif line[0] == "-" or line[0] == "*":
-            list_type = {"-": "ul", "*": "ol"}
-            current_index = index
-            ul_string = "<{}>\n".format(list_type[line[0]])
-            while (current_index < len(markdown) and
-                   markdown[current_index][0] in ["-", "*"]):
-                ul_string += li(markdown[current_index], flags)
-                current_index += 1
-            index = current_index - 1  # Because while ends one after.
-            ul_string += "</{}>\n".format(list_type[line[0]])
-            html.append(ul_string)
-
-        # If only a newline.
-        elif line[0] == "\n":
-            line = ""
-
-        # Else there are no special characters at beggining of line.
-        else:
-            paragraph = "<p>\n"
-            new_index = index
-
-            while new_index < len(markdown):
-                line = clean_line(markdown[new_index])
-                if ((new_index + 1) < len(markdown)
-                        and markdown[new_index + 1] is not None):
-                    next_line = markdown[new_index + 1]
-                else:
-                    next_line = "\n"
-                if "-s" in flags:
-                    line = "    " + line
-                paragraph += line.strip() + "\n"
-                if next_line[0] in ["*", "#", "-", "\n"]:
-                    index = new_index
-                    break
-
-                # If next line has no special characters.
-                if next_line[0] not in ["#", "-", "\n"]:
-                    if "-s" in flags:
-                        br = r"        <br />"
-                    else:
-                        br = r"<br/>"
-                    br += "\n"
-                    paragraph += br
-
-                new_index += 1
-
-            paragraph += "</p>\n"
-
-            html.append(paragraph)
-
-        index += 1
-
-    # Create html "text" string with corresponding newlines.
+def remove_c_inline(ln=""):
+    """remove letter c in the line"""
     text = ""
-    for line in html:
-        if "\n" not in line:
-            line += "\n"
-        text += line
-
-    if "-v" in flags:
-        print(text)
-
-    # Write into <ouput_filename> file.
-    with open(ouput_filename, "w") as f:
-        f.write(text)
-
-    exit(0)
-
-
-def h(line):
-    """
-        Creates a heading html element.
-        <h{1..6}>...</h{1..6}>
-    """
-    line = line.replace("\n", "")
-
-    line = line.strip()
-    parse_space = line.split(" ")
-
-    level = parse_space[0].count("#")
-
-    if (level > 6):
-        return(line)
-
-    # Removes closing symbols at end of line.
-    if len(parse_space[-1]) == parse_space[-1].count("#"):
-        parse_space = parse_space[0:-1]
-
-    # Concatenates the content string.
-    content = ""
-    for word in parse_space[1:]:
-        content += word + " "
-    content = content[0:-1]
-
-    return("<h{}>{}</h{}>".format(level, content, level))
+    new = ""
+    if ln.find("((") != -1 and ln.find("))") != -1:
+        reg_exp = '{}({}(|{}){})'.format('\\', '\\', '\\', '\\')
+        spline = re.split(reg_exp, ln)
+        for i in range(len(spline)):
+            if i % 2 != 0:
+                for j, char in enumerate(spline[i]):
+                    if char != 'C' and char != 'c':
+                        new += char
+                text += new
+            else:
+                text += spline[i]
+        return text
+    else:
+        return ln
 
 
-def li(line, flags):
-    """
-        Creates a list item html element.
-        <li>...</li>
-    """
-    line = line.replace("\n", "")
-    line = line.strip()
-    parse_space = line.split(" ")
-
-    # Concatenates the content string.
-    content = ""
-    for word in parse_space[1:]:
-        content += word + " "
-    content = content[0:-1]
-    content = "<li>{}</li>\n".format(content)
-
-    # if "-s" in flags:
-    #     content = "    " + content
-
-    return(content)
+def parse_inline_to_md5(ln=""):
+    """replace [[text]] to MD5"""
+    text = ""
+    if ln.find("[[") != -1 and ln.find("]]") != -1:
+        reg_exp = '{}[{}[|{}]{}]'.format('\\', '\\', '\\', '\\')
+        spline = re.split(reg_exp, ln)
+        for i in range(len(spline)):
+            if i % 2 != 0:
+                hash_object = hashlib.md5(spline[i].encode())
+                md5_hash = hash_object.hexdigest()
+                text += md5_hash
+            else:
+                text += spline[i]
+        return text
+    else:
+        return ln
 
 
-def clean_line(line):
-    r"""
-        Method for cleaning the format of
-        the line off of text styling tags
-        with the use of Regular expressions.
-        <b>...<\b>
-        <em>...<\em>
-        [[...]] = md5(...)
-        ((...)) = ... with no 'C' or 'c' characters.
-    """
-    # Replace ** for <b> tags
-    line = re.sub(r"\*\*(\S+)", r"<b>\1", line)
-    line = re.sub(r"(\S+)\*\*", r"\1</b>", line)
-
-    # Replace __ for <em> tags
-    line = re.sub(r"\_\_(\S+)", r"<em>\1", line)
-    line = re.sub(r"(\S+)\_\_", r"\1</em>", line)
-
-    # Replace [[<content>]] for md5 hash of content.
-    line = re.sub(r"\[\[(.*)\]\]", md5(r"\1".encode()).hexdigest(), line)
-
-    # Replace ((<content>)) for no C characters on content.
-    result = re.search(r"(\(\((.*)\)\))", line)
-    if result is not None:
-        content = result.group(2)
-        content = re.sub("[cC]", "", content)
-        line = re.sub(r"\(\((.*)\)\)", content, line)
-
-    return(line)
+def add_inline_tags(ln="", st="", o_tag="", c_tag=""):
+    """Insert inline tags on README line"""
+    text = ""
+    tag_opened = False
+    if ln.find(st) != -1 and ln.find(st, 1) != -1:
+        spline = ln.split(st)
+        for i in range(len(spline)):
+            if i % 2 != 0 and tag_opened is False:
+                text += o_tag
+                tag_opened = True
+            elif i % 2 == 0 and tag_opened is True:
+                text += c_tag
+                tag_opened = False
+            text += spline[i]
+        if text.find(o_tag + c_tag) != -1:
+            text = text.replace(o_tag + c_tag, st + st)
+        return text
+    else:
+        return ln
 
 
-def perror(*args, **kwargs):
-    """
-        Printing to STDERR file descriptor.
-    """
-    print(*args, file=stderr, **kwargs)
+headers = ["###### ", "##### ", "#### ", "### ", "## ", "# "]
+hOpTags = {headers[0]: "<h6>", headers[1]: "<h5>", headers[2]: "<h4>",
+           headers[3]: "<h3>", headers[4]: "<h2>", headers[5]: "<h1>"}
+hClTags = {headers[0]: "</h6>", headers[1]: "</h5>", headers[2]: "</h4>",
+           headers[3]: "</h3>", headers[4]: "</h2>", headers[5]: "</h1>"}
+isUlOpened = False
+isOlOpened = False
+isPOpened = False
+isPreText = False
 
 
 if __name__ == "__main__":
-
-    if len(av) < 3:
-        perror("Usage: ./markdown2html.py README.md README.html")
-        # perror("Usage: ./markdown2html.py README.md README.html [-s]")
+    # Validate arguments
+    if len(sys.argv) < 3:
+        sys.stderr.write("Usage: ./markdown2html.py README.md README.html\n")
+        exit(1)
+    if not os.path.exists(sys.argv[1]):
+        sys.stderr.write("Missing {}\n".format(sys.argv[1]))
         exit(1)
 
-    if exists(av[1]) is False:
-        perror("Missing {}".format(av[1]))
-        exit(1)
+    # Input file
+    fr = open(sys.argv[1], 'r')
+    inFile = fr.read().split('\n')
 
-    mark2html(*av)
+    # Output file
+    fw = open(sys.argv[2], 'w')
+
+    for line in inFile:
+        # Validate first 2 characters
+        if line.find('# ') == 0 or line.find('##') == 0 or \
+                line.find('- ') == 0 or line.find('* ') == 0:
+
+            # close previous paragraph
+            if isPOpened is True:
+                isPOpened = False
+                isPreText = False
+                fw.write('\n</p>\n')
+
+            # Validate heading levels
+            if line.find('#') == 0:
+                for head in headers:
+                    if line.find(head) == 0:
+                        hText = line.split(head)[1]
+                        hText = add_inline_tags(hText, "**", "<b>", "</b>")
+                        hText = add_inline_tags(hText, "__", "<em>", "</em>")
+                        fw.write("{}{}{}".format(hOpTags[head],
+                                                 hText,
+                                                 hClTags[head]))
+                        break
+
+            # Validate unordered lists
+            if line.find('- ') == 0:
+                if isUlOpened is False:
+                    fw.write('<ul>\n')
+                    isUlOpened = True
+                lText = line.split('- ')
+                lText[1] = add_inline_tags(lText[1], "**", "<b>", "</b>")
+                lText[1] = add_inline_tags(lText[1], "__", "<em>", "</em>")
+                lText[1] = parse_inline_to_md5(lText[1])
+                lText[1] = remove_c_inline(lText[1])
+                fw.write('<li>{}</li>'.format(lText[1]))
+
+            # Validate ordered lists
+            if line.find('* ') == 0:
+                if isOlOpened is False:
+                    fw.write('<ol>\n')
+                    isOlOpened = True
+                lText = line.split('* ')
+                lText[1] = add_inline_tags(lText[1], "**", "<b>", "</b>")
+                lText[1] = add_inline_tags(lText[1], "__", "<em>", "</em>")
+                lText[1] = parse_inline_to_md5(lText[1])
+                lText[1] = remove_c_inline(lText[1])
+                fw.write('<li>{}</li>'.format(lText[1]))
+
+            # Validate empty line
+            if line != '':
+                fw.write('\n')
+        else:
+            # close previous lists
+            if isUlOpened is True:
+                isUlOpened = False
+                fw.write('</ul>\n')
+            if isOlOpened is True:
+                isOlOpened = False
+                fw.write('</ol>\n')
+
+            if isPOpened is False and line != '':
+                fw.write('<p>\n')
+                isPOpened = True
+
+            if isPOpened is True and line != '':
+                line = add_inline_tags(line, "**", "<b>", "</b>")
+                line = add_inline_tags(line, "__", "<em>", "</em>")
+                line = parse_inline_to_md5(line)
+                line = remove_c_inline(line)
+                if isPreText is False:
+                    fw.write('{}'.format(line))
+                    isPreText = True
+                else:
+                    fw.write('\n<br/>\n{}'.format(line))
+            elif isPOpened is True:
+                isPOpened = False
+                isPreText = False
+                fw.write('\n</p>\n')
+
+    # close HTML file
+    fw.close()
